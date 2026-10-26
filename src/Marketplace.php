@@ -191,18 +191,23 @@ final class Marketplace
      */
     private function withinRate(): bool
     {
-        $now = time();
-        $recent = array_filter(
-            array_map('intval', explode(',', (string) $this->cache->get('marketplace-rate'))),
-            fn ($at) => $at > $now - 60,
-        );
-        if (count($recent) >= $this->perMinute) {
-            return false;
-        }
-        $recent[] = $now;
-        $this->cache->put('marketplace-rate', implode(',', $recent), 120);
+        // Workers don't share memory — they coordinate only through this file,
+        // so the read-modify-write has to be serialised or two requests read
+        // the same count, both think they're under the cap, and both write.
+        return $this->cache->locked('marketplace-rate', function (): bool {
+            $now = time();
+            $recent = array_filter(
+                array_map('intval', explode(',', (string) $this->cache->get('marketplace-rate'))),
+                fn ($at) => $at > $now - 60,
+            );
+            if (count($recent) >= $this->perMinute) {
+                return false;
+            }
+            $recent[] = $now;
+            $this->cache->put('marketplace-rate', implode(',', $recent), 120);
 
-        return true;
+            return true;
+        });
     }
 
     private function refuse(int $status, string $why): array

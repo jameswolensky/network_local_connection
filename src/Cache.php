@@ -35,6 +35,32 @@ final class Cache
         chmod($file, 0600);
     }
 
+    /**
+     * Run $fn while holding an exclusive lock keyed on $key, so concurrent
+     * callers serialise a read-modify-write instead of racing it. The lock is
+     * a sidecar file next to the entry; if it can't be opened, $fn still runs.
+     *
+     * @template T
+     * @param  callable():T  $fn
+     * @return T
+     */
+    public function locked(string $key, callable $fn): mixed
+    {
+        $handle = fopen($this->path($key) . '.lock', 'c');
+        if ($handle === false) {
+            return $fn();
+        }
+
+        try {
+            flock($handle, LOCK_EX);
+
+            return $fn();
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+    }
+
     private function path(string $key): string
     {
         return $this->dir . '/' . preg_replace('/[^a-z0-9._-]/i', '_', $key) . '.json';
